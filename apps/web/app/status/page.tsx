@@ -1,4 +1,8 @@
-import { readServerEnv } from "@/lib/env";
+import {
+  hasBlobStorage,
+  readServerEnv,
+  resolveBlobStorageProvider,
+} from "@/lib/env";
 import { listRecentErrors } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
@@ -17,7 +21,7 @@ interface BackendStatus {
   uptime_s?: number;
   in_flight?: number;
   last_error_ts?: number | null;
-  providers?: { fal?: boolean; openrouter?: boolean };
+  providers?: { fal?: boolean; openrouter?: boolean; dashscope?: boolean };
   error?: string;
 }
 
@@ -37,6 +41,7 @@ async function fetchBackendStatus(): Promise<BackendStatus | null> {
 }
 
 function buildRows(env: ReturnType<typeof readServerEnv>): Row[] {
+  const storageProvider = resolveBlobStorageProvider(env).toUpperCase();
   return [
     {
       key: "MODAL_API_URL",
@@ -51,16 +56,10 @@ function buildRows(env: ReturnType<typeof readServerEnv>): Row[] {
       hint: "MongoDB connection string + database name for the node graph.",
     },
     {
-      key: "R2_ACCOUNT_ID + R2_BUCKET + R2 keys",
+      key: `${storageProvider} blob storage`,
       required: true,
-      ok: Boolean(
-        env.R2_ACCOUNT_ID &&
-          env.R2_ACCESS_KEY_ID &&
-          env.R2_SECRET_ACCESS_KEY &&
-          env.R2_BUCKET &&
-          env.R2_PUBLIC_BASE_URL
-      ),
-      hint: "Cloudflare R2 for generated image blobs.",
+      ok: hasBlobStorage(env),
+      hint: "Generated image blob storage. Configure OSS_* for Alibaba Cloud OSS or R2_* for Cloudflare R2.",
     },
     {
       key: "NEXT_PUBLIC_LTX_WS_URL",

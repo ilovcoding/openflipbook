@@ -81,7 +81,7 @@ cd ../..
 
 # Web env
 cp .env.example apps/web/.env.local
-# fill: MONGODB_URI, MONGODB_DB, R2_*, MODAL_API_URL (=http://backend:8787 if using compose)
+# fill: MONGODB_URI, MONGODB_DB, OSS_* (or R2_*), MODAL_API_URL (=http://backend:8787 if using compose)
 
 # Dev loop
 docker compose up -d --build        # one-command E2E: mongo + backend + web
@@ -95,8 +95,8 @@ Open `/status` in the browser for a live env check with green/red badges per mis
 | Service | Used for | Variable |
 |---|---|---|
 | [fal](https://fal.ai/dashboard/keys) | image gen (nano-banana) + optional animate fallback | `FAL_KEY` |
-| [OpenRouter](https://openrouter.ai/keys) | planning + click VLM + web search | `OPENROUTER_API_KEY` |
-| [Cloudflare R2](https://dash.cloudflare.com/?to=/:account/r2) | generated-image storage | `R2_*` + `R2_PUBLIC_BASE_URL` |
+| [OpenRouter](https://openrouter.ai/keys) or [Alibaba Cloud Model Studio / Bailian](https://bailian.console.aliyun.com/) | planning + click VLM + web search | `OPENROUTER_API_KEY` or `DASHSCOPE_API_KEY` + `LLM_PROVIDER` |
+| [Alibaba Cloud OSS](https://www.aliyun.com/product/oss) or [Cloudflare R2](https://dash.cloudflare.com/?to=/:account/r2) | generated-image storage | `OSS_*` + `OSS_PUBLIC_BASE_URL` or `R2_*` + `R2_PUBLIC_BASE_URL` |
 | MongoDB | node graph + session metadata | `MONGODB_URI`, `MONGODB_DB` |
 | [Modal](https://modal.com) | Python backend host; optional GPU worker for streaming | `modal token new` |
 

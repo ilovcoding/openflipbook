@@ -163,10 +163,26 @@ async def _check_provider(name: str, url: str) -> bool:
 
 async def status_payload(service: str) -> dict[str, Any]:
     """Build the payload for /status endpoints. Cheap; safe to call often."""
-    fal_ok, openrouter_ok = await asyncio.gather(
-        _check_provider("fal", "https://fal.run/health"),
-        _check_provider("openrouter", "https://openrouter.ai/api/v1/models"),
-    )
+    provider_checks = {
+        "fal": _check_provider("fal", "https://fal.run/health"),
+    }
+    llm_provider = os.environ.get("LLM_PROVIDER", "").strip().lower()
+    if os.environ.get("DASHSCOPE_API_KEY") or llm_provider in (
+        "dashscope",
+        "aliyun",
+        "bailian",
+        "qwen",
+    ):
+        provider_checks["dashscope"] = _check_provider(
+            "dashscope",
+            "https://dashscope.aliyuncs.com/compatible-mode/v1/models",
+        )
+    if os.environ.get("OPENROUTER_API_KEY") or not provider_checks.get("dashscope"):
+        provider_checks["openrouter"] = _check_provider(
+            "openrouter", "https://openrouter.ai/api/v1/models"
+        )
+    provider_names = list(provider_checks)
+    provider_results = await asyncio.gather(*provider_checks.values())
     return {
         "ok": True,
         "service": service,
@@ -174,8 +190,5 @@ async def status_payload(service: str) -> dict[str, Any]:
         "uptime_s": round(time.time() - _started_at, 1),
         "in_flight": _in_flight,
         "last_error_ts": _last_error_ts,
-        "providers": {
-            "fal": fal_ok,
-            "openrouter": openrouter_ok,
-        },
+        "providers": dict(zip(provider_names, provider_results)),
     }

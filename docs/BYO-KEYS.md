@@ -2,10 +2,11 @@
 
 Endless Canvas has no hosted backend. To actually generate pages you need to provide:
 
-1. **OpenRouter API key** — planning + VLM click interpretation + web search.
+1. **LLM API key** — planning + VLM click interpretation + web search.
+   Use either OpenRouter or Alibaba Cloud Model Studio / Bailian (DashScope).
 2. **fal API key** — image generation (nano-banana).
 3. **Modal account + token** — hosts the orchestration FastAPI app (and, once step 8 lands, the LTX-2 video worker).
-4. **Cloudflare R2 bucket** — blob storage for generated images.
+4. **Alibaba Cloud OSS or Cloudflare R2 bucket** — blob storage for generated images.
 5. **Postgres database** — metadata for the node graph. Any Postgres works (Railway, Neon, Supabase, local).
 
 Optional for v1:
@@ -17,24 +18,44 @@ Optional for v1:
 | Service | Where to get it | Env var |
 |---|---|---|
 | OpenRouter | <https://openrouter.ai/keys> | `OPENROUTER_API_KEY` |
+| Alibaba Cloud Model Studio / Bailian | <https://bailian.console.aliyun.com/> | `DASHSCOPE_API_KEY` |
 | fal | <https://fal.ai/dashboard/keys> | `FAL_KEY` |
 | Modal | `brew install modal-cli && modal token new` | (stored on disk) |
+| Alibaba Cloud OSS | OSS bucket + RAM AccessKey. Needs write permission on the bucket. | `OSS_REGION`, `OSS_ACCESS_KEY_ID`, `OSS_ACCESS_KEY_SECRET`, `OSS_BUCKET` |
+| OSS public URL | Bucket public endpoint or custom/CDN domain. | `OSS_PUBLIC_BASE_URL` |
 | Cloudflare R2 | Cloudflare dash → R2 → Manage tokens. Needs *Object Read & Write*. | `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET` |
 | R2 public URL | Enable the R2 bucket's public dev URL, or attach a custom domain. | `R2_PUBLIC_BASE_URL` |
 | MongoDB | Railway → Add MongoDB (or Atlas M0 free). | `MONGODB_URI`, `MONGODB_DB` |
 
 ## 2. Set Modal secrets
 
-Modal reads secrets at runtime from a named secret, not your local `.env`. Create one that the backend expects:
+Modal reads secrets at runtime from a named secret, not your local `.env`.
+Create one that the backend expects. For OpenRouter:
 
 ```bash
 modal secret create openflipbook-secrets \
   FAL_KEY="$FAL_KEY" \
   OPENROUTER_API_KEY="$OPENROUTER_API_KEY" \
-  OPENROUTER_VLM_MODEL="qwen/qwen-2.5-vl-72b-instruct" \
-  OPENROUTER_TEXT_MODEL="qwen/qwen-2.5-72b-instruct" \
+  LLM_PROVIDER="openrouter" \
   OPENROUTER_ENABLE_WEB_SEARCH=true
 ```
+
+For Alibaba Cloud Model Studio / Bailian Qwen:
+
+```bash
+modal secret create openflipbook-secrets \
+  FAL_KEY="$FAL_KEY" \
+  DASHSCOPE_API_KEY="$DASHSCOPE_API_KEY" \
+  LLM_PROVIDER="dashscope" \
+  DASHSCOPE_BASE_URL="https://dashscope.aliyuncs.com/compatible-mode/v1" \
+  DASHSCOPE_TEXT_MODEL="qwen-plus" \
+  DASHSCOPE_VLM_MODEL="qwen-vl-plus" \
+  DASHSCOPE_ENABLE_WEB_SEARCH=true \
+  DASHSCOPE_ENABLE_THINKING=false
+```
+
+If your account has the newer VL models enabled, `DASHSCOPE_VLM_MODEL` can be
+changed to `qwen3-vl-plus` or `qwen3-vl-flash`.
 
 ## 3. Deploy the Modal backend
 
@@ -57,9 +78,20 @@ During development you can use `modal serve generate.py` instead — it prints a
 Create `apps/web/.env.local`:
 
 ```bash
+BLOB_STORAGE_PROVIDER=oss
+BLOB_STORAGE_PREFIX=flipbook
+OSS_REGION=oss-cn-beijing
+OSS_ENDPOINT=
+OSS_ACCESS_KEY_ID=...
+OSS_ACCESS_KEY_SECRET=...
+OSS_BUCKET=openflipbook
+OSS_PUBLIC_BASE_URL=https://openflipbook.oss-cn-beijing.aliyuncs.com
+
 MODAL_API_URL=...
 MONGODB_URI=mongodb://...
 MONGODB_DB=openflipbook
+
+# Alternative: Cloudflare R2
 R2_ACCOUNT_ID=...
 R2_ACCESS_KEY_ID=...
 R2_SECRET_ACCESS_KEY=...

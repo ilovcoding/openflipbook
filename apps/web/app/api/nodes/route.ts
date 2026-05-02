@@ -1,7 +1,12 @@
 import { NextResponse } from "next/server";
 import { insertNode } from "@/lib/db";
 import { decodeDataUrl, uploadJpeg } from "@/lib/r2";
-import { readServerEnv } from "@/lib/env";
+import {
+  blobStorageObjectKey,
+  hasBlobStorage,
+  readServerEnv,
+  resolveBlobStorageProvider,
+} from "@/lib/env";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -21,11 +26,12 @@ interface CreateBody {
 
 export async function POST(req: Request) {
   const env = readServerEnv();
-  if (!env.MONGODB_URI || !env.MONGODB_DB || !env.R2_BUCKET) {
+  if (!env.MONGODB_URI || !env.MONGODB_DB || !hasBlobStorage(env)) {
+    const provider = resolveBlobStorageProvider(env).toUpperCase();
     return NextResponse.json(
       {
         error:
-          "MONGODB_URI/MONGODB_DB or R2_* not set. See docs/BYO-KEYS.md. Persistence is disabled; the generated image is still usable in-memory.",
+          `MONGODB_URI/MONGODB_DB or ${provider}_* storage env not set. See docs/BYO-KEYS.md. Persistence is disabled; the generated image is still usable in-memory.`,
       },
       { status: 503 }
     );
@@ -42,7 +48,10 @@ export async function POST(req: Request) {
   const decoded = decodeDataUrl(body.image_data_url);
   const extension = decoded.contentType === "image/png" ? "png" : "jpg";
   const keyPrefix = body.session_id.replace(/[^a-zA-Z0-9._-]/g, "_");
-  const objectKey = `${keyPrefix}/${crypto.randomUUID()}.${extension}`;
+  const objectKey = blobStorageObjectKey(
+    env,
+    `${keyPrefix}/${crypto.randomUUID()}.${extension}`
+  );
 
   const uploaded = await uploadJpeg(objectKey, decoded.bytes, decoded.contentType);
 

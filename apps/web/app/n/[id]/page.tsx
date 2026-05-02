@@ -2,7 +2,7 @@ import { cache } from "react";
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { getNode, type NodeRow } from "@/lib/db";
-import { readServerEnv } from "@/lib/env";
+import { hasBlobStorage, publicBlobUrl, readServerEnv } from "@/lib/env";
 
 interface PermalinkPageProps {
   params: Promise<{ id: string }>;
@@ -10,7 +10,7 @@ interface PermalinkPageProps {
 
 const cachedGetNode = cache(async (id: string): Promise<NodeRow | null> => {
   const env = readServerEnv();
-  if (!env.MONGODB_URI || !env.MONGODB_DB || !env.R2_PUBLIC_BASE_URL) {
+  if (!env.MONGODB_URI || !env.MONGODB_DB || !hasBlobStorage(env)) {
     return null;
   }
   try {
@@ -22,9 +22,7 @@ const cachedGetNode = cache(async (id: string): Promise<NodeRow | null> => {
 
 function publicImageUrl(node: NodeRow): string | null {
   const env = readServerEnv();
-  if (!env.R2_PUBLIC_BASE_URL) return null;
-  const base = env.R2_PUBLIC_BASE_URL.replace(/\/$/, "");
-  return `${base}/${node.image_key}`;
+  return publicBlobUrl(env, node.image_key);
 }
 
 export async function generateMetadata({
@@ -74,13 +72,13 @@ export default async function PermalinkPage({ params }: PermalinkPageProps) {
   const { id } = await params;
   const env = readServerEnv();
 
-  if (!env.MONGODB_URI || !env.MONGODB_DB || !env.R2_PUBLIC_BASE_URL) {
+  if (!env.MONGODB_URI || !env.MONGODB_DB || !hasBlobStorage(env)) {
     return (
       <main className="mx-auto flex min-h-dvh max-w-3xl flex-col items-center justify-center px-4 py-16 text-center">
         <h1 className="text-2xl font-bold">Persistence not configured</h1>
         <p className="mt-4 opacity-70">
-          Set <code>MONGODB_URI</code>, <code>MONGODB_DB</code> and{" "}
-          <code>R2_*</code> in your environment to enable permalinks. See{" "}
+          Set <code>MONGODB_URI</code>, <code>MONGODB_DB</code> and blob storage
+          env vars (<code>OSS_*</code> or <code>R2_*</code>) to enable permalinks. See{" "}
           <code>docs/BYO-KEYS.md</code>.
         </p>
         <p className="mt-6 text-xs opacity-60">Requested node: <code>{id}</code></p>

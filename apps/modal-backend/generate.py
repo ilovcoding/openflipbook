@@ -33,7 +33,9 @@ image = (
 secrets = [
     modal.Secret.from_name(
         "openflipbook-secrets",
-        required_keys=["FAL_KEY", "OPENROUTER_API_KEY"],
+        # LLM provider can be OpenRouter or DashScope. Require only fal here;
+        # the selected provider validates its own key at request time.
+        required_keys=["FAL_KEY"],
     )
 ]
 

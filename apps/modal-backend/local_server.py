@@ -26,11 +26,14 @@ _root = _here.parent.parent
 load_dotenv(_here / ".env", override=False)
 load_dotenv(_root / ".env", override=False)
 
-for required in ("FAL_KEY", "OPENROUTER_API_KEY"):
-    if not os.environ.get(required):
-        print(
-            f"[local_server] warning: {required} is not set; requests that need it will fail."
-        )
+if not os.environ.get("FAL_KEY"):
+    print("[local_server] warning: FAL_KEY is not set; image generation will fail.")
+
+if not (os.environ.get("OPENROUTER_API_KEY") or os.environ.get("DASHSCOPE_API_KEY")):
+    print(
+        "[local_server] warning: no LLM key set; configure OPENROUTER_API_KEY "
+        "or DASHSCOPE_API_KEY."
+    )
 
 import uvicorn  # noqa: E402
 from generate import fastapi_app  # noqa: E402

@@ -1,14 +1,15 @@
-"""OpenRouter-backed LLM/VLM client.
+"""OpenAI-compatible LLM/VLM client.
 
-Uses the openai SDK pointed at https://openrouter.ai/api/v1. Defaults are
-Gemini 3 Flash (multimodal) for both planning and click-resolution — strong
-JSON adherence, large context, cheap. Override via env to use Gemini 3 Pro
-or another OpenRouter slug.
+Supports two providers behind the same OpenAI SDK surface:
 
-Web search: Gemini-family models on OpenRouter don't accept the legacy
-`:online` suffix universally, so for those we attach the OpenRouter web
-plugin (`extra_body={"plugins": [{"id": "web"}]}`) instead. Other models
-keep the `:online` suffix path.
+- OpenRouter: set OPENROUTER_API_KEY. Keeps the original `:online` /
+  OpenRouter web-plugin behavior.
+- Alibaba Cloud Model Studio / DashScope: set LLM_PROVIDER=dashscope and
+  DASHSCOPE_API_KEY. Uses https://dashscope.aliyuncs.com/compatible-mode/v1
+  by default, with Qwen text + VL models.
+
+The project only needs chat completions and image_url messages, so both
+providers stay isolated to this file.
 """
 
 from __future__ import annotations
@@ -18,11 +19,14 @@ import os
 from dataclasses import dataclass
 from typing import Any
 
-from openai import AsyncOpenAI
+from openai import AsyncOpenAI, BadRequestError
 
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
-DEFAULT_VLM_MODEL = "google/gemini-3-flash-preview"
-DEFAULT_TEXT_MODEL = "google/gemini-3-flash-preview"
+DASHSCOPE_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+DEFAULT_OPENROUTER_VLM_MODEL = "google/gemini-3-flash-preview"
+DEFAULT_OPENROUTER_TEXT_MODEL = "google/gemini-3-flash-preview"
+DEFAULT_DASHSCOPE_VLM_MODEL = "qwen-vl-plus"
+DEFAULT_DASHSCOPE_TEXT_MODEL = "qwen-plus"
 
 
 @dataclass
@@ -38,36 +42,98 @@ class ClickResolution:
     style: str
 
 
-_OPENAI_CLIENT: AsyncOpenAI | None = None
+@dataclass(frozen=True)
+class ProviderConfig:
+    name: str
+    api_key_env: str
+    base_url: str
+    text_model_env: str
+    vlm_model_env: str
+    default_text_model: str
+    default_vlm_model: str
+
+
+_OPENAI_CLIENTS: dict[str, AsyncOpenAI] = {}
+
+
+def _env_bool(name: str, default: bool) -> bool:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    return raw.lower() in ("1", "true", "yes", "on")
+
+
+def _provider() -> ProviderConfig:
+    requested = os.environ.get("LLM_PROVIDER", "").strip().lower()
+    if not requested:
+        requested = (
+            "dashscope"
+            if os.environ.get("DASHSCOPE_API_KEY")
+            and not os.environ.get("OPENROUTER_API_KEY")
+            else "openrouter"
+        )
+
+    if requested in ("dashscope", "aliyun", "bailian", "qwen"):
+        return ProviderConfig(
+            name="dashscope",
+            api_key_env="DASHSCOPE_API_KEY",
+            base_url=os.environ.get("DASHSCOPE_BASE_URL", DASHSCOPE_BASE_URL),
+            text_model_env="DASHSCOPE_TEXT_MODEL",
+            vlm_model_env="DASHSCOPE_VLM_MODEL",
+            default_text_model=DEFAULT_DASHSCOPE_TEXT_MODEL,
+            default_vlm_model=DEFAULT_DASHSCOPE_VLM_MODEL,
+        )
+
+    if requested != "openrouter":
+        raise RuntimeError(
+            f"Unsupported LLM_PROVIDER={requested!r}; use openrouter or dashscope"
+        )
+
+    return ProviderConfig(
+        name="openrouter",
+        api_key_env="OPENROUTER_API_KEY",
+        base_url=OPENROUTER_BASE_URL,
+        text_model_env="OPENROUTER_TEXT_MODEL",
+        vlm_model_env="OPENROUTER_VLM_MODEL",
+        default_text_model=DEFAULT_OPENROUTER_TEXT_MODEL,
+        default_vlm_model=DEFAULT_OPENROUTER_VLM_MODEL,
+    )
 
 
 def _client() -> AsyncOpenAI:
-    """Module-level singleton AsyncOpenAI client.
+    """Provider-keyed singleton AsyncOpenAI client.
 
     Constructing AsyncOpenAI is cheap individually (~5 ms) but happens up to 4
     times per /sse/generate today; the underlying httpx pool also restarts
     each time, so warm keepalives never benefit. Reuse one instance.
     """
-    global _OPENAI_CLIENT
-    if _OPENAI_CLIENT is None:
-        api_key = os.environ.get("OPENROUTER_API_KEY")
-        if not api_key:
-            raise RuntimeError("OPENROUTER_API_KEY is not set")
-        _OPENAI_CLIENT = AsyncOpenAI(
-            api_key=api_key,
-            base_url=OPENROUTER_BASE_URL,
-            default_headers={
-                "HTTP-Referer": os.environ.get(
-                    "OPENROUTER_REFERER", "https://github.com/eren23/openflipbook"
-                ),
-                "X-Title": "Endless Canvas",
-            },
-        )
-    return _OPENAI_CLIENT
+    cfg = _provider()
+    cached = _OPENAI_CLIENTS.get(cfg.name)
+    if cached is not None:
+        return cached
+
+    api_key = os.environ.get(cfg.api_key_env)
+    if not api_key:
+        raise RuntimeError(f"{cfg.api_key_env} is not set")
+
+    kwargs: dict[str, Any] = {
+        "api_key": api_key,
+        "base_url": cfg.base_url,
+    }
+    if cfg.name == "openrouter":
+        kwargs["default_headers"] = {
+            "HTTP-Referer": os.environ.get(
+                "OPENROUTER_REFERER", "https://github.com/eren23/openflipbook"
+            ),
+            "X-Title": "Endless Canvas",
+        }
+    client = AsyncOpenAI(**kwargs)
+    _OPENAI_CLIENTS[cfg.name] = client
+    return client
 
 
 def _cache_enabled() -> bool:
-    return os.environ.get("OPENROUTER_CACHE", "true").lower() in ("1", "true", "yes")
+    return _provider().name == "openrouter" and _env_bool("OPENROUTER_CACHE", True)
 
 
 def _system_message(text: str) -> dict[str, Any]:
@@ -111,17 +177,17 @@ def _log_cache_usage(span_ctx: dict[str, Any], response: Any) -> None:
 
 
 def _vlm_model() -> str:
-    return os.environ.get("OPENROUTER_VLM_MODEL", DEFAULT_VLM_MODEL)
+    cfg = _provider()
+    return os.environ.get(cfg.vlm_model_env, cfg.default_vlm_model)
 
 
 def _web_search_enabled(online: bool) -> bool:
     if not online:
         return False
-    return os.environ.get("OPENROUTER_ENABLE_WEB_SEARCH", "true").lower() in (
-        "1",
-        "true",
-        "yes",
-    )
+    cfg = _provider()
+    if cfg.name == "dashscope":
+        return _env_bool("DASHSCOPE_ENABLE_WEB_SEARCH", True)
+    return _env_bool("OPENROUTER_ENABLE_WEB_SEARCH", True)
 
 
 def _supports_online_suffix(model: str) -> bool:
@@ -134,16 +200,62 @@ def _supports_online_suffix(model: str) -> bool:
 
 
 def _text_model(online: bool) -> str:
-    base = os.environ.get("OPENROUTER_TEXT_MODEL", DEFAULT_TEXT_MODEL)
-    if _web_search_enabled(online) and _supports_online_suffix(base):
+    cfg = _provider()
+    base = os.environ.get(cfg.text_model_env, cfg.default_text_model)
+    if (
+        cfg.name == "openrouter"
+        and _web_search_enabled(online)
+        and _supports_online_suffix(base)
+    ):
         return f"{base}:online"
     return base
 
 
-def _web_plugin_extra(model: str, online: bool) -> dict[str, Any]:
+def _dashscope_supports_thinking_toggle(model: str) -> bool:
+    lowered = model.lower()
+    return (
+        (
+            lowered.startswith("qwen3")
+            or lowered.startswith("qwen3.5")
+            or lowered.startswith("qwen3.6")
+        )
+        and "thinking" not in lowered
+    )
+
+
+def _extra_body(model: str, online: bool) -> dict[str, Any]:
+    cfg = _provider()
+    if cfg.name == "dashscope":
+        extra: dict[str, Any] = {}
+        if _web_search_enabled(online):
+            extra["enable_search"] = True
+        if _dashscope_supports_thinking_toggle(model):
+            # For this app JSON adherence matters more than visible reasoning.
+            # Users can opt back in with DASHSCOPE_ENABLE_THINKING=true.
+            extra["enable_thinking"] = _env_bool("DASHSCOPE_ENABLE_THINKING", False)
+        return extra
+
     if _web_search_enabled(online) and not _supports_online_suffix(model):
         return {"plugins": [{"id": "web"}]}
     return {}
+
+
+def _response_format_unsupported(exc: BadRequestError) -> bool:
+    text = str(exc).lower()
+    return "response_format" in text or "json_object" in text
+
+
+async def _json_chat_completion(client: AsyncOpenAI, **kwargs: Any) -> Any:
+    """Request JSON mode when supported; retry plain chat on provider mismatch."""
+    try:
+        return await client.chat.completions.create(
+            **kwargs,
+            response_format={"type": "json_object"},
+        )
+    except BadRequestError as exc:
+        if _provider().name == "dashscope" and _response_format_unsupported(exc):
+            return await client.chat.completions.create(**kwargs)
+        raise
 
 
 async def click_to_subject(
@@ -206,9 +318,11 @@ async def click_to_subject(
     )
     from obs import span
 
-    async with span("vlm.click_to_subject", model=_vlm_model()) as ctx:
-        response = await client.chat.completions.create(
-            model=_vlm_model(),
+    vlm_model = _vlm_model()
+    async with span("vlm.click_to_subject", model=vlm_model) as ctx:
+        response = await _json_chat_completion(
+            client,
+            model=vlm_model,
             messages=[
                 _system_message(system),
                 {
@@ -222,9 +336,9 @@ async def click_to_subject(
                     ],
                 },
             ],
-            response_format={"type": "json_object"},
             temperature=0.2,
             max_tokens=300,
+            extra_body=_extra_body(vlm_model, online=False) or None,
         )
         _log_cache_usage(ctx, response)
     raw = (response.choices[0].message.content or "{}").strip()
@@ -292,17 +406,19 @@ async def plan_page(
     from obs import span
 
     text_model = _text_model(online=web_search)
-    async with span("planner.plan_page", model=text_model, web_search=web_search) as ctx:
-        response = await client.chat.completions.create(
+    async with span(
+        "planner.plan_page", model=text_model, web_search=web_search
+    ) as ctx:
+        response = await _json_chat_completion(
+            client,
             model=text_model,
             messages=[
                 _system_message(system),
                 {"role": "user", "content": user},
             ],
-            response_format={"type": "json_object"},
             temperature=0.7,
             max_tokens=900,
-            extra_body=_web_plugin_extra(text_model, online=web_search) or None,
+            extra_body=_extra_body(text_model, online=web_search) or None,
         )
         _log_cache_usage(ctx, response)
     raw = (response.choices[0].message.content or "{}").strip()
@@ -334,7 +450,7 @@ async def rewrite_motion_prompt(
     action, and a short atmospheric beat, capped to one sentence.
 
     Strictly additive: failures fall back to the original page_title so
-    animate never breaks if OpenRouter is misconfigured.
+    animate never breaks if the LLM provider is misconfigured.
     """
     seed = (page_title or "").strip()
     if not seed:
@@ -369,8 +485,9 @@ async def rewrite_motion_prompt(
     try:
         async with span("llm.rewrite_motion") as ctx:
             if image_data_url:
+                vlm_model = _vlm_model()
                 response = await client.chat.completions.create(
-                    model=_vlm_model(),
+                    model=vlm_model,
                     messages=[
                         _system_message(system),
                         {
@@ -389,16 +506,19 @@ async def rewrite_motion_prompt(
                     ],
                     temperature=0.4,
                     max_tokens=160,
+                    extra_body=_extra_body(vlm_model, online=False) or None,
                 )
             else:
+                text_model = _text_model(online=False)
                 response = await client.chat.completions.create(
-                    model=_text_model(online=False),
+                    model=text_model,
                     messages=[
                         _system_message(system),
                         {"role": "user", "content": user_text},
                     ],
                     temperature=0.4,
                     max_tokens=160,
+                    extra_body=_extra_body(text_model, online=False) or None,
                 )
             _log_cache_usage(ctx, response)
         rewritten = (response.choices[0].message.content or "").strip()
@@ -451,6 +571,7 @@ async def polish_edit_instruction(
                 ],
                 temperature=0.3,
                 max_tokens=120,
+                extra_body=_extra_body(text_model, online=False) or None,
             )
             _log_cache_usage(ctx, response)
         polished = (response.choices[0].message.content or "").strip()

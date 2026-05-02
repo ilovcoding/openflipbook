@@ -17,7 +17,7 @@ cd apps/modal-backend
 uv venv --python 3.12 --seed
 source .venv/bin/activate
 uv pip install -r requirements.txt
-cp .env.example .env      # then fill in FAL_KEY + OPENROUTER_API_KEY
+cp .env.example .env      # then fill in FAL_KEY + an LLM provider key
 ```
 
 ### Web app
@@ -35,19 +35,30 @@ MODAL_API_URL=http://localhost:8787
 MONGODB_URI=<your existing cluster>
 MONGODB_DB=openflipbook
 
-R2_ACCOUNT_ID=5d3211faff5f9446d940004811bd...
-R2_ACCESS_KEY_ID=<reuse or new token with endlessvideo write access>
-R2_SECRET_ACCESS_KEY=<same>
-R2_BUCKET=endlessvideo
-R2_PUBLIC_BASE_URL=https://pub-<hash>.r2.dev
+BLOB_STORAGE_PROVIDER=oss
+BLOB_STORAGE_PREFIX=flipbook
+OSS_REGION=oss-cn-beijing
+OSS_ACCESS_KEY_ID=<your RAM AccessKey ID>
+OSS_ACCESS_KEY_SECRET=<your RAM AccessKey secret>
+OSS_BUCKET=openflipbook
+OSS_PUBLIC_BASE_URL=https://openflipbook.oss-cn-beijing.aliyuncs.com
+
+# Or use Cloudflare R2 instead:
+# BLOB_STORAGE_PROVIDER=r2
+# R2_ACCOUNT_ID=5d3211faff5f9446d940004811bd...
+# R2_ACCESS_KEY_ID=<reuse or new token with endlessvideo write access>
+# R2_SECRET_ACCESS_KEY=<same>
+# R2_BUCKET=endlessvideo
+# R2_PUBLIC_BASE_URL=https://pub-<hash>.r2.dev
 
 # Leave blank — local dev uses the cheap fal fallback.
 NEXT_PUBLIC_LTX_WS_URL=
 ```
 
-Enable the R2.dev subdomain on the `endlessvideo` bucket (Cloudflare dash →
-R2 → `endlessvideo` → Settings → Public Access → R2.dev subdomain → Allow
-Access) to get `R2_PUBLIC_BASE_URL`.
+For OSS, `OSS_PUBLIC_BASE_URL` should be a browser-readable bucket endpoint
+or custom domain. If the bucket is private, put a CDN/signed-URL layer in
+front before using permalinks. For R2, enable the R2.dev subdomain on the
+bucket to get `R2_PUBLIC_BASE_URL`.
 
 ## Run
 
@@ -78,8 +89,8 @@ Open <http://localhost:3000/play> and type a query. The flow:
 |---|---|
 | `/play` shows "MODAL_API_URL is not set" | `apps/web/.env.local` loaded? Next restarted after edit? |
 | 502 / timeout on generate | Python backend running on the port matching `MODAL_API_URL`? `curl http://localhost:8787/health`. |
-| Image generates but save fails | Mongo reachable? R2 token scoped to `endlessvideo`? `/status` page shows red badges. |
-| VLM click returns parent title | That is the fallback when VLM can't parse. Check OpenRouter credits. |
+| Image generates but save fails | Mongo reachable? OSS/R2 token scoped to the bucket? `/status` page shows red badges. |
+| VLM click returns parent title | That is the fallback when VLM can't parse. Check OpenRouter/DashScope credits and model name. |
 | Animate 500s | fal credits? Check Python backend logs. |
 
 ## Port already in use on 8000
@@ -97,4 +108,5 @@ The app runs, but:
 - `/play` keeps working; you just don't get `/n/<id>` URLs.
 
 So for a quick "does it generate pretty pictures" smoke test, only FAL_KEY +
-OPENROUTER_API_KEY are strictly required.
+one LLM provider key (`OPENROUTER_API_KEY` or `DASHSCOPE_API_KEY`) is strictly
+required.
