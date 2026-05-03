@@ -26,8 +26,20 @@ _root = _here.parent.parent
 load_dotenv(_here / ".env", override=False)
 load_dotenv(_root / ".env", override=False)
 
-if not os.environ.get("FAL_KEY"):
+image_provider = os.environ.get("IMAGE_PROVIDER", "").strip().lower()
+if not image_provider:
+    image_provider = (
+        "dashscope"
+        if os.environ.get("DASHSCOPE_API_KEY") and not os.environ.get("FAL_KEY")
+        else "fal"
+    )
+
+if image_provider == "fal" and not os.environ.get("FAL_KEY"):
     print("[local_server] warning: FAL_KEY is not set; image generation will fail.")
+elif image_provider == "dashscope" and not os.environ.get("DASHSCOPE_API_KEY"):
+    print(
+        "[local_server] warning: DASHSCOPE_API_KEY is not set; image generation will fail."
+    )
 
 if not (os.environ.get("OPENROUTER_API_KEY") or os.environ.get("DASHSCOPE_API_KEY")):
     print(

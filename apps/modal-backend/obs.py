@@ -163,15 +163,26 @@ async def _check_provider(name: str, url: str) -> bool:
 
 async def status_payload(service: str) -> dict[str, Any]:
     """Build the payload for /status endpoints. Cheap; safe to call often."""
-    provider_checks = {
-        "fal": _check_provider("fal", "https://fal.run/health"),
-    }
+    provider_checks = {}
+    image_provider = os.environ.get("IMAGE_PROVIDER", "").strip().lower()
+    if not image_provider:
+        image_provider = (
+            "dashscope"
+            if os.environ.get("DASHSCOPE_API_KEY") and not os.environ.get("FAL_KEY")
+            else "fal"
+        )
+    if image_provider == "fal" or os.environ.get("FAL_KEY"):
+        provider_checks["fal"] = _check_provider("fal", "https://fal.run/health")
     llm_provider = os.environ.get("LLM_PROVIDER", "").strip().lower()
-    if os.environ.get("DASHSCOPE_API_KEY") or llm_provider in (
+    if (
+        os.environ.get("DASHSCOPE_API_KEY")
+        or image_provider == "dashscope"
+        or llm_provider in (
         "dashscope",
         "aliyun",
         "bailian",
         "qwen",
+        )
     ):
         provider_checks["dashscope"] = _check_provider(
             "dashscope",
