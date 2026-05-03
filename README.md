@@ -2,6 +2,8 @@
 
 > **An open-source [flipbook.page](https://flipbook.page) clone, image-is-the-UI.** Every page is an AI-generated illustration. Tap anywhere on the image and a vision model resolves what you tapped, turns it into the next page, and keeps going. Seed from a text query or drop in any image. Bring your own API keys; clone, run, hack.
 
+> 本项目基于 [eren23/openflipbook](https://github.com/eren23/openflipbook) 改造而来，感谢原作者开源了这个有意思的项目。当前改造主要包括：适配阿里云百炼 / 千问系列文本模型和图像生成模型，并将对象存储从原方案替换为阿里云 OSS。
+
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![GitHub stars](https://img.shields.io/github/stars/eren23/openflipbook?style=social)](https://github.com/eren23/openflipbook/stargazers)
 [![Node](https://img.shields.io/badge/node-%3E%3D20-green.svg)](package.json)
